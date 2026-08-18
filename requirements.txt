@@ -1,0 +1,2 @@
+mcp[cli]
+httpx>=0.27
