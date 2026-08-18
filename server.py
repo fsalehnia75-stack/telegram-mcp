@@ -1,4 +1,7 @@
+import base64
+import binascii
 import json
+import mimetypes
 import os
 from typing import Any
 
@@ -95,6 +98,108 @@ def send_telegram_message(
         "message_id": message.get("message_id"),
         "chat_id": message.get("chat", {}).get("id"),
         "date": message.get("date"),
+    }
+
+
+@mcp.tool()
+def send_telegram_photo(
+    destination: str,
+    photo_url: str = "",
+    photo_base64: str = "",
+    photo_filename: str = "image.jpg",
+    caption: str = "",
+    silent: bool = False,
+) -> dict[str, Any]:
+    """Send a photo to one approved Telegram destination.
+
+    Exactly one image source must be supplied: ``photo_url`` or
+    ``photo_base64``. Base64 input is uploaded as multipart form data.
+
+    Args:
+        destination: Approved destination name, such as "main".
+        photo_url: Public HTTP(S) image URL Telegram can fetch.
+        photo_base64: Base64-encoded image bytes.
+        photo_filename: Filename used for base64 uploads, including extension.
+        caption: Optional caption, up to 1024 characters.
+        silent: Send without notification sound.
+    """
+    _require_config()
+
+    if destination not in DESTINATIONS:
+        raise ValueError(
+            f"Unknown destination '{destination}'. "
+            f"Allowed: {', '.join(sorted(DESTINATIONS))}"
+        )
+
+    has_url = bool(isinstance(photo_url, str) and photo_url.strip())
+    has_base64 = bool(isinstance(photo_base64, str) and photo_base64.strip())
+    if has_url == has_base64:
+        raise ValueError("Exactly one of photo_url or photo_base64 must be provided.")
+
+    if not isinstance(caption, str):
+        raise ValueError("Caption must be a string.")
+    if len(caption) > 1024:
+        raise ValueError("Caption is longer than Telegram's 1024-character limit.")
+
+    chat_id = DESTINATIONS[destination]
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    data = {
+        "chat_id": chat_id,
+        "caption": caption,
+        "disable_notification": str(silent).lower(),
+    }
+
+    with httpx.Client(timeout=30.0) as client:
+        if has_url:
+            normalized_url = photo_url.strip()
+            if not normalized_url.startswith(("http://", "https://")):
+                raise ValueError("photo_url must start with http:// or https://.")
+            response = client.post(
+                url,
+                data={**data, "photo": normalized_url},
+            )
+        else:
+            encoded = photo_base64.strip()
+            if encoded.startswith("data:"):
+                if ";base64," not in encoded:
+                    raise ValueError("photo_base64 data URL must contain ';base64,'.")
+                encoded = encoded.split(";base64,", 1)[1]
+
+            try:
+                image_bytes = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("photo_base64 must be valid base64-encoded image data.") from exc
+
+            if not image_bytes:
+                raise ValueError("photo_base64 decoded to an empty file.")
+
+            filename = os.path.basename(photo_filename.strip() or "image.jpg")
+            mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            response = client.post(
+                url,
+                data=data,
+                files={"photo": (filename, image_bytes, mime_type)},
+            )
+
+    try:
+        result = response.json()
+    except Exception:
+        result = {"ok": False, "description": response.text}
+
+    if response.status_code >= 400 or not result.get("ok"):
+        description = result.get("description", "Telegram API request failed.")
+        raise RuntimeError(f"Telegram error: {description}")
+
+    message = result["result"]
+    photos = message.get("photo") or []
+    file_id = photos[-1].get("file_id") if photos else None
+    return {
+        "ok": True,
+        "destination": destination,
+        "message_id": message.get("message_id"),
+        "chat_id": message.get("chat", {}).get("id"),
+        "date": message.get("date"),
+        "file_id": file_id,
     }
 
 
