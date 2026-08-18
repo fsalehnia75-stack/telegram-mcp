@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-mcp
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_DESTINATIONS
+        sync: false
