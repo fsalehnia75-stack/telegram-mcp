@@ -9,3 +9,15 @@ services:
         sync: false
       - key: TELEGRAM_DESTINATIONS
         sync: false
+      - key: MCP_AUTH_ENABLED
+        value: "true"
+      - key: MCP_AUTH_ISSUER_URL
+        sync: false
+      - key: MCP_PUBLIC_URL
+        value: https://telegram-mcp-hk2e.onrender.com/mcp
+      - key: MCP_AUTH_AUDIENCE
+        value: https://telegram-mcp-hk2e.onrender.com/mcp
+      - key: MCP_AUTH_REQUIRED_SCOPES
+        value: telegram:send
+      - key: TELEGRAM_SEND_RATE_LIMIT_PER_MINUTE
+        value: "12"
