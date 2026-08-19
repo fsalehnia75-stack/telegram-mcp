@@ -1,2 +1,3 @@
-mcp[cli]
-httpx>=0.27
+mcp[cli]==2.0.0
+httpx>=0.27,<1
+PyJWT[crypto]>=2.10,<3
