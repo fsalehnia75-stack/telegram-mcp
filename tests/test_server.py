@@ -9,6 +9,7 @@ os.environ.setdefault("MCP_AUTH_ENABLED", "false")
 
 import server
 import auto_server
+import combined_server
 
 
 class TelegramServerTests(unittest.TestCase):
@@ -82,6 +83,11 @@ class TelegramServerTests(unittest.TestCase):
         self.assertTrue(
             manual_tools.isdisjoint(automatic_tools - {"list_telegram_destinations"})
         )
+
+    def test_combined_server_exposes_both_mcp_paths(self) -> None:
+        route_paths = {getattr(route, "path", None) for route in combined_server.app.routes}
+        self.assertIn("/mcp", route_paths)
+        self.assertIn("/auto-mcp", route_paths)
 
     def test_publish_news_package_sends_photo_then_article(self) -> None:
         payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
