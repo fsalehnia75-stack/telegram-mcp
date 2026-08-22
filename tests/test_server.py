@@ -57,6 +57,7 @@ class TelegramServerTests(unittest.TestCase):
             "send_telegram_message",
             "send_telegram_photo",
             "publish_news_package",
+            "auto_publish_news_package",
         ):
             self.assertFalse(annotations[name].read_only_hint)
             self.assertTrue(annotations[name].destructive_hint)
@@ -114,6 +115,78 @@ class TelegramServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["photo_message_id"], 12)
         self.assertIsNone(result["article_message_id"])
+
+    def test_auto_publish_accepts_only_qualified_news(self) -> None:
+        expected = {
+            "ok": True,
+            "status": "complete",
+            "destination": "main",
+            "photo_message_id": 20,
+            "article_message_id": 21,
+        }
+        with patch.object(
+            server,
+            "publish_news_package",
+            return_value=expected.copy(),
+        ) as publish:
+            result = server.auto_publish_news_package(
+                article_text="verified article",
+                editorial_score=72,
+                verification_status="VERIFIED",
+                temporal_validation_status="PASS",
+                editorial_decision="HIGH_PRIORITY",
+                blocking_gates=[],
+                photo_url="https://example.com/news.jpg",
+            )
+
+        publish.assert_called_once_with(
+            destination="main",
+            article_text="verified article",
+            photo_url="https://example.com/news.jpg",
+            photo_base64="",
+            photo_filename="news-image.jpg",
+            photo_caption="",
+            silent=False,
+            disable_link_preview=False,
+        )
+        self.assertEqual(result["mode"], "automatic")
+        self.assertEqual(result["editorial_score"], 72)
+
+    def test_auto_publish_rejects_score_below_threshold(self) -> None:
+        with patch.object(server, "publish_news_package") as publish:
+            with self.assertRaisesRegex(ValueError, "editorial_score >= 55"):
+                server.auto_publish_news_package(
+                    article_text="conditional article",
+                    editorial_score=54,
+                    verification_status="VERIFIED",
+                    temporal_validation_status="PASS",
+                    editorial_decision="CONDITIONAL",
+                    blocking_gates=[],
+                    photo_url="https://example.com/news.jpg",
+                )
+        publish.assert_not_called()
+
+    def test_auto_publish_rejects_failed_gates(self) -> None:
+        invalid_cases = (
+            {"verification_status": "UNVERIFIED"},
+            {"temporal_validation_status": "FAIL"},
+            {"editorial_decision": "CONDITIONAL"},
+            {"blocking_gates": ["SOURCE_GATE"]},
+        )
+        defaults = {
+            "article_text": "article",
+            "editorial_score": 70,
+            "verification_status": "VERIFIED",
+            "temporal_validation_status": "PASS",
+            "editorial_decision": "PUBLISHABLE",
+            "blocking_gates": [],
+            "photo_url": "https://example.com/news.jpg",
+        }
+        with patch.object(server, "publish_news_package") as publish:
+            for changes in invalid_cases:
+                with self.subTest(changes=changes), self.assertRaises(ValueError):
+                    server.auto_publish_news_package(**(defaults | changes))
+        publish.assert_not_called()
 
 
 if __name__ == "__main__":
