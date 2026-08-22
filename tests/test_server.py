@@ -79,7 +79,7 @@ class TelegramServerTests(unittest.TestCase):
         self.assertNotIn("**", formatted)
 
     def test_publish_news_package_sends_formatted_article_then_reply_photo(self) -> None:
-        payload = base64.b64encode(b"\\x89PNG\\r\\n\\x1a\\ncontent").decode()
+        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
         article_result = {"ok": True, "result": {"message_id": 11}}
         photo_result = {"ok": True, "result": {"message_id": 12}}
 
@@ -90,7 +90,7 @@ class TelegramServerTests(unittest.TestCase):
         ) as telegram_post:
             result = server.publish_news_package(
                 "main",
-                "**تیتر**\\n\\nمنبع: [Source](https://example.com/news)",
+                "**تیتر**\n\nمنبع: [Source](https://example.com/news)",
                 photo_base64=payload,
                 photo_filename="featured.png",
             )
@@ -107,7 +107,7 @@ class TelegramServerTests(unittest.TestCase):
         self.assertEqual(article_payload["parse_mode"], "HTML")
         self.assertEqual(
             article_payload["text"],
-            '<b>تیتر</b>\\n\\nمنبع: <a href="https://example.com/news">Source</a>',
+            '<b>تیتر</b>\n\nمنبع: <a href="https://example.com/news">Source</a>',
         )
         photo_form = telegram_post.call_args_list[1].kwargs["form_data"]
         self.assertEqual(
@@ -116,7 +116,7 @@ class TelegramServerTests(unittest.TestCase):
         )
 
     def test_publish_news_package_reports_partial_photo_send(self) -> None:
-        payload = base64.b64encode(b"\\x89PNG\\r\\n\\x1a\\ncontent").decode()
+        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
         article_result = {"ok": True, "result": {"message_id": 12}}
 
         with patch.object(
