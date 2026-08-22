@@ -118,7 +118,7 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.4.0",
+        version="1.5.0",
         instructions=(
             "This server is restricted to the user's scheduled newsroom workflow. "
             "It exposes no free-form send actions. Automatic publication is permitted "
@@ -356,14 +356,15 @@ def publish_news_package(
 ) -> dict[str, Any]:
     """Publish one approved news package with one fresh confirmation.
 
-    The package sends the image first and the full article second. The client must
-    show the exact destination, image, caption, and article text, then obtain fresh
-    user confirmation for this specific package. One approval covers this single
-    two-message publication only.
+    The package sends the full article first, then sends the image as a direct
+    reply to the article. The client must show the exact destination, image,
+    caption, and article text, then obtain fresh user confirmation for this
+    specific package. One approval covers this single two-message publication only.
 
     Exactly one image source is required: ``photo_url`` or ``photo_base64``.
-    If Telegram accepts the image but rejects the article, the result is returned
-    with ``status=partial`` and the image message ID so callers do not resend it.
+    If Telegram accepts the article but rejects the image, the result is returned
+    with ``status=partial`` and the article message ID so callers can retry only
+    the image as a reply without duplicating the article.
     """
     _require_config()
     chat_id = _require_destination(destination)
@@ -401,32 +402,36 @@ def publish_news_package(
 
     # Reserve both Telegram operations before the irreversible first send.
     _enforce_send_rate_limit(slots=2)
-    photo_result = _telegram_post(
-        "sendPhoto",
-        form_data=form_data,
-        files=files,
-        timeout=30.0,
+    article_result = _telegram_post(
+        "sendMessage",
+        json_payload={
+            "chat_id": chat_id,
+            "text": article_text,
+            "disable_notification": silent,
+            "link_preview_options": {"is_disabled": disable_link_preview},
+        },
+        timeout=20.0,
     )
-    photo_message_id = photo_result["result"].get("message_id")
+    article_message_id = article_result["result"].get("message_id")
+    form_data["reply_parameters"] = json.dumps(
+        {"message_id": article_message_id}
+    )
 
     try:
-        article_result = _telegram_post(
-            "sendMessage",
-            json_payload={
-                "chat_id": chat_id,
-                "text": article_text,
-                "disable_notification": silent,
-                "link_preview_options": {"is_disabled": disable_link_preview},
-            },
-            timeout=20.0,
+        photo_result = _telegram_post(
+            "sendPhoto",
+            form_data=form_data,
+            files=files,
+            timeout=30.0,
         )
     except RuntimeError as exc:
         return {
             "ok": False,
             "status": "partial",
             "destination": destination,
-            "photo_message_id": photo_message_id,
-            "article_message_id": None,
+            "photo_message_id": None,
+            "article_message_id": article_message_id,
+            "photo_reply_to_message_id": article_message_id,
             "error": str(exc),
         }
 
@@ -434,8 +439,9 @@ def publish_news_package(
         "ok": True,
         "status": "complete",
         "destination": destination,
-        "photo_message_id": photo_message_id,
-        "article_message_id": article_result["result"].get("message_id"),
+        "photo_message_id": photo_result["result"].get("message_id"),
+        "article_message_id": article_message_id,
+        "photo_reply_to_message_id": article_message_id,
     }
 
 
