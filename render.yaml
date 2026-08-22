@@ -3,7 +3,7 @@ services:
     name: telegram-mcp
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python server.py
+    startCommand: python combined_server.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
@@ -19,5 +19,13 @@ services:
         value: https://telegram-mcp-hk2e.onrender.com/mcp
       - key: MCP_AUTH_REQUIRED_SCOPES
         value: telegram:send
+      - key: AUTO_MCP_PUBLIC_URL
+        value: https://telegram-mcp-hk2e.onrender.com/auto-mcp
+      - key: AUTO_AUTH_AUDIENCE
+        value: https://telegram-mcp-hk2e.onrender.com/auto-mcp
+      - key: AUTO_AUTH_REQUIRED_SCOPES
+        value: telegram:auto_publish
+      - key: TELEGRAM_AUTO_PUBLISH_DESTINATION
+        value: main
       - key: TELEGRAM_SEND_RATE_LIMIT_PER_MINUTE
         value: "12"

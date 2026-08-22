@@ -8,6 +8,23 @@ from pydantic import AnyHttpUrl
 
 import server
 
+AUTO_MCP_PUBLIC_URL = os.environ.get(
+    "AUTO_MCP_PUBLIC_URL",
+    server.MCP_PUBLIC_URL.removesuffix("/mcp") + "/auto-mcp"
+    if server.MCP_PUBLIC_URL
+    else "",
+).strip()
+AUTO_AUTH_AUDIENCE = os.environ.get(
+    "AUTO_AUTH_AUDIENCE", AUTO_MCP_PUBLIC_URL
+).strip()
+AUTO_AUTH_REQUIRED_SCOPES = [
+    scope
+    for scope in os.environ.get(
+        "AUTO_AUTH_REQUIRED_SCOPES", "telegram:auto_publish"
+    ).split()
+    if scope
+]
+
 
 def _build_auto_server() -> MCPServer:
     kwargs: dict[str, Any] = {}
@@ -16,8 +33,8 @@ def _build_auto_server() -> MCPServer:
             name
             for name, value in (
                 ("MCP_AUTH_ISSUER_URL", server.AUTH_ISSUER_URL),
-                ("MCP_PUBLIC_URL", server.MCP_PUBLIC_URL),
-                ("MCP_AUTH_AUDIENCE", server.AUTH_AUDIENCE),
+                ("AUTO_MCP_PUBLIC_URL", AUTO_MCP_PUBLIC_URL),
+                ("AUTO_AUTH_AUDIENCE", AUTO_AUTH_AUDIENCE),
             )
             if not value
         ]
@@ -29,12 +46,12 @@ def _build_auto_server() -> MCPServer:
         kwargs = {
             "token_verifier": server.JWTTokenVerifier(
                 server.AUTH_ISSUER_URL,
-                server.AUTH_AUDIENCE,
+                AUTO_AUTH_AUDIENCE,
             ),
             "auth": AuthSettings(
                 issuer_url=AnyHttpUrl(server.AUTH_ISSUER_URL),
-                resource_server_url=AnyHttpUrl(server.MCP_PUBLIC_URL),
-                required_scopes=server.AUTH_REQUIRED_SCOPES,
+                resource_server_url=AnyHttpUrl(AUTO_MCP_PUBLIC_URL),
+                required_scopes=AUTO_AUTH_REQUIRED_SCOPES,
             ),
         }
 
