@@ -1,7 +1,9 @@
 import base64
 import binascii
 import json
+import html
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -118,7 +120,7 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.5.0",
+        version="1.6.0",
         instructions=(
             "This server is restricted to the user's scheduled newsroom workflow. "
             "It exposes no free-form send actions. Automatic publication is permitted "
@@ -190,6 +192,18 @@ def _decode_image(encoded: str) -> tuple[bytes, str, str]:
     raise ValueError("Only PNG, JPEG, and WebP images are accepted.")
 
 
+def _markdown_to_telegram_html(text: str) -> str:
+    """Convert the newsroom's limited Markdown subset to safe Telegram HTML."""
+    escaped = html.escape(text, quote=True)
+    escaped = re.sub(
+        r"\[([^\]\n]+)\]\((https://[^\s)]+)\)",
+        r'<a href="\2">\1</a>',
+        escaped,
+    )
+    escaped = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", escaped)
+    return escaped
+
+
 def _telegram_post(
     method: str,
     *,
@@ -259,7 +273,8 @@ def send_telegram_message(
     chat_id = _require_destination(destination)
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Message text cannot be empty.")
-    if len(text) > 4096:
+    formatted_text = _markdown_to_telegram_html(text.strip())
+    if len(formatted_text) > 4096:
         raise ValueError("Message is longer than Telegram's 4096-character limit.")
 
     _enforce_send_rate_limit()
@@ -267,7 +282,8 @@ def send_telegram_message(
         "sendMessage",
         json_payload={
             "chat_id": chat_id,
-            "text": text,
+            "text": formatted_text,
+            "parse_mode": "HTML",
             "disable_notification": silent,
             "link_preview_options": {"is_disabled": disable_link_preview},
         },
@@ -371,7 +387,8 @@ def publish_news_package(
 
     if not isinstance(article_text, str) or not article_text.strip():
         raise ValueError("Article text cannot be empty.")
-    if len(article_text) > 4096:
+    formatted_article = _markdown_to_telegram_html(article_text.strip())
+    if len(formatted_article) > 4096:
         raise ValueError("Article text is longer than Telegram's 4096-character limit.")
     if not isinstance(photo_caption, str):
         raise ValueError("Photo caption must be a string.")
