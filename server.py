@@ -118,13 +118,12 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.3.0",
+        version="1.4.0",
         instructions=(
-            "Telegram send tools create irreversible external messages. Manual send tools "
-            "require fresh confirmation immediately before every send. The separate "
-            "auto_publish_news_package tool may be used without per-item confirmation only "
-            "inside the user's scheduled newsroom workflow under standing authorization; "
-            "it enforces editorial gates and a fixed configured destination."
+            "This server is restricted to the user's scheduled newsroom workflow. "
+            "It exposes no free-form send actions. Automatic publication is permitted "
+            "only when the server-side editorial score, verification, temporal, decision, "
+            "and blocking-gate checks pass; the destination is fixed by configuration."
         ),
         **kwargs,
     )
@@ -239,15 +238,6 @@ def list_telegram_destinations() -> dict[str, Any]:
     }
 
 
-@mcp.tool(
-    title="Send Telegram message",
-    annotations=ToolAnnotations(
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-)
 def send_telegram_message(
     destination: str,
     text: str,
@@ -290,15 +280,6 @@ def send_telegram_message(
     }
 
 
-@mcp.tool(
-    title="Send Telegram photo",
-    annotations=ToolAnnotations(
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-)
 def send_telegram_photo(
     destination: str,
     photo_url: str = "",
@@ -363,15 +344,6 @@ def send_telegram_photo(
     }
 
 
-@mcp.tool(
-    title="Publish Telegram news package",
-    annotations=ToolAnnotations(
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-)
 def publish_news_package(
     destination: str,
     article_text: str,
@@ -467,6 +439,15 @@ def publish_news_package(
     }
 
 
+@mcp.tool(
+    title="Auto-publish verified Telegram news package",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+)
 def auto_publish_news_package(
     article_text: str,
     editorial_score: int,
