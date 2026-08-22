@@ -120,7 +120,7 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.6.0",
+        version="1.6.1",
         instructions=(
             "This server is restricted to the user's scheduled newsroom workflow. "
             "It exposes no free-form send actions. Automatic publication is permitted "
@@ -423,7 +423,8 @@ def publish_news_package(
         "sendMessage",
         json_payload={
             "chat_id": chat_id,
-            "text": article_text,
+            "text": formatted_article,
+            "parse_mode": "HTML",
             "disable_notification": silent,
             "link_preview_options": {"is_disabled": disable_link_preview},
         },
