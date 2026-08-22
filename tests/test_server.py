@@ -63,46 +63,66 @@ class TelegramServerTests(unittest.TestCase):
         self.assertFalse(auto_annotations.idempotent_hint)
         self.assertTrue(auto_annotations.open_world_hint)
 
-    def test_publish_news_package_sends_photo_then_article(self) -> None:
+    def test_markdown_to_telegram_html_formats_bold_and_sources(self) -> None:
+        source = (
+            "**تیتر خبر**\n\n"
+            "- **نکته:** متن خبر\n\n"
+            "منبع: [Crypto.news](https://crypto.news/example)"
+        )
+        formatted = server._markdown_to_telegram_html(source)
+        self.assertIn("<b>تیتر خبر</b>", formatted)
+        self.assertIn("- <b>نکته:</b> متن خبر", formatted)
+        self.assertIn(
+            '<a href="https://crypto.news/example">Crypto.news</a>',
+            formatted,
+        )
+        self.assertNotIn("**", formatted)
+
+    def test_publish_news_package_sends_formatted_article_then_reply_photo(self) -> None:
         payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
-        photo_result = {"ok": True, "result": {"message_id": 10}}
         article_result = {"ok": True, "result": {"message_id": 11}}
-
-        with patch.object(
-            server,
-            "_telegram_post",
-            side_effect=[photo_result, article_result],
-        ) as telegram_post:
-            result = server.publish_news_package(
-                "main",
-                "final article",
-                photo_base64=payload,
-                photo_filename="featured.png",
-            )
-
-        self.assertEqual(
-            result,
-            {
-                "ok": True,
-                "status": "complete",
-                "destination": "main",
-                "photo_message_id": 10,
-                "article_message_id": 11,
-            },
-        )
-        self.assertEqual(
-            [call.args[0] for call in telegram_post.call_args_list],
-            ["sendPhoto", "sendMessage"],
-        )
-
-    def test_publish_news_package_reports_partial_send(self) -> None:
-        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
         photo_result = {"ok": True, "result": {"message_id": 12}}
 
         with patch.object(
             server,
             "_telegram_post",
-            side_effect=[photo_result, RuntimeError("Telegram network request failed.")],
+            side_effect=[article_result, photo_result],
+        ) as telegram_post:
+            result = server.publish_news_package(
+                "main",
+                "**تیتر**\n\nمنبع: [Source](https://example.com/news)",
+                photo_base64=payload,
+                photo_filename="featured.png",
+            )
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["article_message_id"], 11)
+        self.assertEqual(result["photo_message_id"], 12)
+        self.assertEqual(result["photo_reply_to_message_id"], 11)
+        self.assertEqual(
+            [call.args[0] for call in telegram_post.call_args_list],
+            ["sendMessage", "sendPhoto"],
+        )
+        article_payload = telegram_post.call_args_list[0].kwargs["json_payload"]
+        self.assertEqual(article_payload["parse_mode"], "HTML")
+        self.assertEqual(
+            article_payload["text"],
+            '<b>تیتر</b>\n\nمنبع: <a href="https://example.com/news">Source</a>',
+        )
+        photo_form = telegram_post.call_args_list[1].kwargs["form_data"]
+        self.assertEqual(
+            photo_form["reply_parameters"],
+            '{"message_id": 11}',
+        )
+
+    def test_publish_news_package_reports_partial_photo_send(self) -> None:
+        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
+        article_result = {"ok": True, "result": {"message_id": 12}}
+
+        with patch.object(
+            server,
+            "_telegram_post",
+            side_effect=[article_result, RuntimeError("Telegram network request failed.")],
         ):
             result = server.publish_news_package(
                 "main",
@@ -112,8 +132,9 @@ class TelegramServerTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["photo_message_id"], 12)
-        self.assertIsNone(result["article_message_id"])
+        self.assertEqual(result["article_message_id"], 12)
+        self.assertIsNone(result["photo_message_id"])
+        self.assertEqual(result["photo_reply_to_message_id"], 12)
 
     def test_auto_publish_accepts_only_qualified_news(self) -> None:
         expected = {
