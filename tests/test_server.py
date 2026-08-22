@@ -8,8 +8,6 @@ os.environ.setdefault("TELEGRAM_DESTINATIONS", '{"main":"-100123"}')
 os.environ.setdefault("MCP_AUTH_ENABLED", "false")
 
 import server
-import auto_server
-import combined_server
 
 
 class TelegramServerTests(unittest.TestCase):
@@ -49,45 +47,21 @@ class TelegramServerTests(unittest.TestCase):
                 server._telegram_post("sendMessage", json_payload={}, timeout=1.0)
         self.assertNotIn("test-token", str(caught.exception))
 
-    def test_tool_annotations_require_confirmation_for_sends(self) -> None:
+    def test_public_tools_are_restricted_to_gated_auto_publish(self) -> None:
         import asyncio
 
         tools = asyncio.run(server.mcp.list_tools())
         annotations = {tool.name: tool.annotations for tool in tools}
         self.assertTrue(annotations["list_telegram_destinations"].read_only_hint)
-        for name in (
-            "send_telegram_message",
-            "send_telegram_photo",
-            "publish_news_package",
-        ):
-            self.assertFalse(annotations[name].read_only_hint)
-            self.assertTrue(annotations[name].destructive_hint)
-            self.assertFalse(annotations[name].idempotent_hint)
-            self.assertTrue(annotations[name].open_world_hint)
-
-    def test_manual_and_automatic_servers_are_separated(self) -> None:
-        import asyncio
-
-        manual_tools = {
-            tool.name for tool in asyncio.run(server.mcp.list_tools())
-        }
-        automatic_tools = {
-            tool.name for tool in asyncio.run(auto_server.mcp.list_tools())
-        }
-
-        self.assertNotIn("auto_publish_news_package", manual_tools)
         self.assertEqual(
-            automatic_tools,
+            set(annotations),
             {"list_telegram_destinations", "auto_publish_news_package"},
         )
-        self.assertTrue(
-            manual_tools.isdisjoint(automatic_tools - {"list_telegram_destinations"})
-        )
-
-    def test_combined_server_exposes_both_mcp_paths(self) -> None:
-        route_paths = {getattr(route, "path", None) for route in combined_server.app.routes}
-        self.assertIn("/mcp", route_paths)
-        self.assertIn("/auto-mcp", route_paths)
+        auto_annotations = annotations["auto_publish_news_package"]
+        self.assertFalse(auto_annotations.read_only_hint)
+        self.assertTrue(auto_annotations.destructive_hint)
+        self.assertFalse(auto_annotations.idempotent_hint)
+        self.assertTrue(auto_annotations.open_world_hint)
 
     def test_publish_news_package_sends_photo_then_article(self) -> None:
         payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
