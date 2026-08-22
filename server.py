@@ -29,6 +29,9 @@ AUTH_REQUIRED_SCOPES = [
     for scope in os.environ.get("MCP_AUTH_REQUIRED_SCOPES", "telegram:send").split()
     if scope
 ]
+AUTO_PUBLISH_DESTINATION = os.environ.get(
+    "TELEGRAM_AUTO_PUBLISH_DESTINATION", "main"
+).strip()
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 SEND_RATE_LIMIT_PER_MINUTE = int(
@@ -115,11 +118,13 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.2.0",
+        version="1.3.0",
         instructions=(
-            "Telegram send tools create irreversible external messages. Show the exact "
-            "destination and final text/caption to the user and obtain fresh confirmation "
-            "immediately before every send. Never reuse approval from an earlier message."
+            "Telegram send tools create irreversible external messages. Manual send tools "
+            "require fresh confirmation immediately before every send. The separate "
+            "auto_publish_news_package tool may be used without per-item confirmation only "
+            "inside the user's scheduled newsroom workflow under standing authorization; "
+            "it enforces editorial gates and a fixed configured destination."
         ),
         **kwargs,
     )
@@ -460,6 +465,79 @@ def publish_news_package(
         "photo_message_id": photo_message_id,
         "article_message_id": article_result["result"].get("message_id"),
     }
+
+
+@mcp.tool(
+    title="Auto-publish verified Telegram news package",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+)
+def auto_publish_news_package(
+    article_text: str,
+    editorial_score: int,
+    verification_status: str,
+    temporal_validation_status: str,
+    editorial_decision: str,
+    blocking_gates: list[str],
+    photo_url: str = "",
+    photo_base64: str = "",
+    photo_filename: str = "news-image.jpg",
+    photo_caption: str = "",
+    silent: bool = False,
+    disable_link_preview: bool = False,
+) -> dict[str, Any]:
+    """Auto-publish a newsroom-qualified package under standing authorization.
+
+    Use only in the user's scheduled newsroom workflow. This tool does not accept
+    a caller-selected destination. It rejects scores below 55, non-verified news,
+    failed temporal validation, non-publishable decisions, and blocking gates.
+    Manual or ad-hoc sends must use the confirmation-gated manual tools instead.
+    """
+    if isinstance(editorial_score, bool) or not isinstance(editorial_score, int):
+        raise ValueError("editorial_score must be an integer between 0 and 100.")
+    if not 55 <= editorial_score <= 100:
+        raise ValueError("Automatic publication requires editorial_score >= 55.")
+    if verification_status.strip().upper() != "VERIFIED":
+        raise ValueError("Automatic publication requires verification_status=VERIFIED.")
+    if temporal_validation_status.strip().upper() != "PASS":
+        raise ValueError(
+            "Automatic publication requires temporal_validation_status=PASS."
+        )
+
+    allowed_decisions = {"BREAKING", "HIGH_PRIORITY", "PUBLISHABLE"}
+    normalized_decision = editorial_decision.strip().upper()
+    if normalized_decision not in allowed_decisions:
+        raise ValueError(
+            "Automatic publication requires BREAKING, HIGH_PRIORITY, or PUBLISHABLE."
+        )
+    if not isinstance(blocking_gates, list) or any(
+        not isinstance(gate, str) for gate in blocking_gates
+    ):
+        raise ValueError("blocking_gates must be a list of strings.")
+    active_gates = [gate.strip() for gate in blocking_gates if gate.strip()]
+    if active_gates:
+        raise ValueError("Automatic publication is blocked by active editorial gates.")
+    if not AUTO_PUBLISH_DESTINATION:
+        raise RuntimeError("TELEGRAM_AUTO_PUBLISH_DESTINATION is not configured.")
+
+    result = publish_news_package(
+        destination=AUTO_PUBLISH_DESTINATION,
+        article_text=article_text,
+        photo_url=photo_url,
+        photo_base64=photo_base64,
+        photo_filename=photo_filename,
+        photo_caption=photo_caption,
+        silent=silent,
+        disable_link_preview=disable_link_preview,
+    )
+    result["mode"] = "automatic"
+    result["editorial_score"] = editorial_score
+    result["editorial_decision"] = normalized_decision
+    return result
 
 
 if __name__ == "__main__":
