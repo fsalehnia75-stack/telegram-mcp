@@ -467,15 +467,6 @@ def publish_news_package(
     }
 
 
-@mcp.tool(
-    title="Auto-publish verified Telegram news package",
-    annotations=ToolAnnotations(
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-)
 def auto_publish_news_package(
     article_text: str,
     editorial_score: int,

@@ -8,6 +8,7 @@ os.environ.setdefault("TELEGRAM_DESTINATIONS", '{"main":"-100123"}')
 os.environ.setdefault("MCP_AUTH_ENABLED", "false")
 
 import server
+import auto_server
 
 
 class TelegramServerTests(unittest.TestCase):
@@ -57,12 +58,30 @@ class TelegramServerTests(unittest.TestCase):
             "send_telegram_message",
             "send_telegram_photo",
             "publish_news_package",
-            "auto_publish_news_package",
         ):
             self.assertFalse(annotations[name].read_only_hint)
             self.assertTrue(annotations[name].destructive_hint)
             self.assertFalse(annotations[name].idempotent_hint)
             self.assertTrue(annotations[name].open_world_hint)
+
+    def test_manual_and_automatic_servers_are_separated(self) -> None:
+        import asyncio
+
+        manual_tools = {
+            tool.name for tool in asyncio.run(server.mcp.list_tools())
+        }
+        automatic_tools = {
+            tool.name for tool in asyncio.run(auto_server.mcp.list_tools())
+        }
+
+        self.assertNotIn("auto_publish_news_package", manual_tools)
+        self.assertEqual(
+            automatic_tools,
+            {"list_telegram_destinations", "auto_publish_news_package"},
+        )
+        self.assertTrue(
+            manual_tools.isdisjoint(automatic_tools - {"list_telegram_destinations"})
+        )
 
     def test_publish_news_package_sends_photo_then_article(self) -> None:
         payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
