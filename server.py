@@ -115,7 +115,7 @@ def _build_server() -> MCPServer:
 
     return MCPServer(
         "Telegram Newsroom",
-        version="1.1.0",
+        version="1.2.0",
         instructions=(
             "Telegram send tools create irreversible external messages. Show the exact "
             "destination and final text/caption to the user and obtain fresh confirmation "
@@ -146,14 +146,16 @@ def _require_destination(destination: str) -> str:
     return DESTINATIONS[destination]
 
 
-def _enforce_send_rate_limit() -> None:
+def _enforce_send_rate_limit(slots: int = 1) -> None:
+    if slots < 1:
+        raise ValueError("Rate-limit slots must be at least 1.")
     now = time.monotonic()
     with _send_lock:
         while _send_times and now - _send_times[0] >= 60:
             _send_times.popleft()
-        if len(_send_times) >= SEND_RATE_LIMIT_PER_MINUTE:
+        if len(_send_times) + slots > SEND_RATE_LIMIT_PER_MINUTE:
             raise RuntimeError("Telegram send rate limit exceeded. Try again later.")
-        _send_times.append(now)
+        _send_times.extend([now] * slots)
 
 
 def _decode_image(encoded: str) -> tuple[bytes, str, str]:
@@ -353,6 +355,110 @@ def send_telegram_photo(
         "ok": True,
         "destination": destination,
         "message_id": result["result"].get("message_id"),
+    }
+
+
+@mcp.tool(
+    title="Publish Telegram news package",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+)
+def publish_news_package(
+    destination: str,
+    article_text: str,
+    photo_url: str = "",
+    photo_base64: str = "",
+    photo_filename: str = "news-image.jpg",
+    photo_caption: str = "",
+    silent: bool = False,
+    disable_link_preview: bool = False,
+) -> dict[str, Any]:
+    """Publish one approved news package with one fresh confirmation.
+
+    The package sends the image first and the full article second. The client must
+    show the exact destination, image, caption, and article text, then obtain fresh
+    user confirmation for this specific package. One approval covers this single
+    two-message publication only.
+
+    Exactly one image source is required: ``photo_url`` or ``photo_base64``.
+    If Telegram accepts the image but rejects the article, the result is returned
+    with ``status=partial`` and the image message ID so callers do not resend it.
+    """
+    _require_config()
+    chat_id = _require_destination(destination)
+
+    if not isinstance(article_text, str) or not article_text.strip():
+        raise ValueError("Article text cannot be empty.")
+    if len(article_text) > 4096:
+        raise ValueError("Article text is longer than Telegram's 4096-character limit.")
+    if not isinstance(photo_caption, str):
+        raise ValueError("Photo caption must be a string.")
+    if len(photo_caption) > 1024:
+        raise ValueError("Photo caption is longer than Telegram's 1024-character limit.")
+
+    has_url = bool(isinstance(photo_url, str) and photo_url.strip())
+    has_base64 = bool(isinstance(photo_base64, str) and photo_base64.strip())
+    if has_url == has_base64:
+        raise ValueError("Exactly one of photo_url or photo_base64 must be provided.")
+
+    form_data: dict[str, Any] = {
+        "chat_id": chat_id,
+        "caption": photo_caption,
+        "disable_notification": str(silent).lower(),
+    }
+    files = None
+    if has_url:
+        normalized_url = photo_url.strip()
+        if not normalized_url.startswith("https://"):
+            raise ValueError("photo_url must start with https://.")
+        form_data["photo"] = normalized_url
+    else:
+        image_bytes, mime_type, extension = _decode_image(photo_base64.strip())
+        base_name = os.path.splitext(os.path.basename(photo_filename.strip()))[0]
+        filename = (base_name or "news-image") + extension
+        files = {"photo": (filename, image_bytes, mime_type)}
+
+    # Reserve both Telegram operations before the irreversible first send.
+    _enforce_send_rate_limit(slots=2)
+    photo_result = _telegram_post(
+        "sendPhoto",
+        form_data=form_data,
+        files=files,
+        timeout=30.0,
+    )
+    photo_message_id = photo_result["result"].get("message_id")
+
+    try:
+        article_result = _telegram_post(
+            "sendMessage",
+            json_payload={
+                "chat_id": chat_id,
+                "text": article_text,
+                "disable_notification": silent,
+                "link_preview_options": {"is_disabled": disable_link_preview},
+            },
+            timeout=20.0,
+        )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "status": "partial",
+            "destination": destination,
+            "photo_message_id": photo_message_id,
+            "article_message_id": None,
+            "error": str(exc),
+        }
+
+    return {
+        "ok": True,
+        "status": "complete",
+        "destination": destination,
+        "photo_message_id": photo_message_id,
+        "article_message_id": article_result["result"].get("message_id"),
     }
 
 

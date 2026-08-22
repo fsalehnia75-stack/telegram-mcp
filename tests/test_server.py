@@ -53,11 +53,67 @@ class TelegramServerTests(unittest.TestCase):
         tools = asyncio.run(server.mcp.list_tools())
         annotations = {tool.name: tool.annotations for tool in tools}
         self.assertTrue(annotations["list_telegram_destinations"].read_only_hint)
-        for name in ("send_telegram_message", "send_telegram_photo"):
+        for name in (
+            "send_telegram_message",
+            "send_telegram_photo",
+            "publish_news_package",
+        ):
             self.assertFalse(annotations[name].read_only_hint)
             self.assertTrue(annotations[name].destructive_hint)
             self.assertFalse(annotations[name].idempotent_hint)
             self.assertTrue(annotations[name].open_world_hint)
+
+    def test_publish_news_package_sends_photo_then_article(self) -> None:
+        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
+        photo_result = {"ok": True, "result": {"message_id": 10}}
+        article_result = {"ok": True, "result": {"message_id": 11}}
+
+        with patch.object(
+            server,
+            "_telegram_post",
+            side_effect=[photo_result, article_result],
+        ) as telegram_post:
+            result = server.publish_news_package(
+                "main",
+                "final article",
+                photo_base64=payload,
+                photo_filename="featured.png",
+            )
+
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "status": "complete",
+                "destination": "main",
+                "photo_message_id": 10,
+                "article_message_id": 11,
+            },
+        )
+        self.assertEqual(
+            [call.args[0] for call in telegram_post.call_args_list],
+            ["sendPhoto", "sendMessage"],
+        )
+
+    def test_publish_news_package_reports_partial_send(self) -> None:
+        payload = base64.b64encode(b"\x89PNG\r\n\x1a\ncontent").decode()
+        photo_result = {"ok": True, "result": {"message_id": 12}}
+
+        with patch.object(
+            server,
+            "_telegram_post",
+            side_effect=[photo_result, RuntimeError("Telegram network request failed.")],
+        ):
+            result = server.publish_news_package(
+                "main",
+                "final article",
+                photo_base64=payload,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["photo_message_id"], 12)
+        self.assertIsNone(result["article_message_id"])
 
 
 if __name__ == "__main__":
